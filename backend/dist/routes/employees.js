@@ -210,13 +210,33 @@ router.put('/:id', async (req, res, next) => {
             data.pan, data.pfNumber, emptyToNull(data.dob), emptyToNull(data.doa), data.qualification, data.status, emptyToNull(data.actualRetirementDate),
             data.earlyRetirementReason || null
         ]);
-        await client.query('DELETE FROM employee_documents WHERE employee_id = $1', [id]);
         if (data.documents && Array.isArray(data.documents)) {
+            const docIds = data.documents.map((d) => d.id).filter(Boolean);
+            if (docIds.length > 0) {
+                await client.query(`DELETE FROM employee_documents WHERE employee_id = $1 AND id != ALL($2)`, [id, docIds]);
+            }
+            else {
+                await client.query(`DELETE FROM employee_documents WHERE employee_id = $1`, [id]);
+            }
             for (const doc of data.documents) {
-                await client.query(`
-          INSERT INTO employee_documents (id, employee_id, name, file_name, data_url)
-          VALUES ($1, $2, $3, $4, $5)
-        `, [doc.id, id, doc.name, doc.fileName, doc.dataUrl]);
+                if (doc.dataUrl) {
+                    await client.query(`
+            INSERT INTO employee_documents (id, employee_id, name, file_name, data_url)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (id) DO UPDATE SET
+              name = EXCLUDED.name,
+              file_name = EXCLUDED.file_name,
+              data_url = EXCLUDED.data_url
+          `, [doc.id, id, doc.name, doc.fileName, doc.dataUrl]);
+                }
+                else {
+                    await client.query(`
+            UPDATE employee_documents SET
+              name = $2,
+              file_name = $3
+            WHERE id = $1 AND employee_id = $4
+          `, [doc.id, doc.name, doc.fileName, id]);
+                }
             }
         }
         await client.query('COMMIT');
